@@ -5,3 +5,7 @@ itsdangerous==2.2.0
 Jinja2==3.1.6
 MarkupSafe==3.0.3
 Werkzeug==3.1.8
+flask-sqlalchemy==3.1.1
+sqlalchemy==2.0.48
+psycopg2==2.9.12
+python-doptenv==1.2.2
