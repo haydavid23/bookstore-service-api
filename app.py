@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import os
 
 from blueprints.bookdetails import bookdetails_bp
+from blueprints.profile import profile_bp
 
 load_dotenv()
 
@@ -13,6 +14,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 db = SQLAlchemy(app)
 
 app.register_blueprint(bookdetails_bp)
+app.register_blueprint(profile_bp)
 
 
 @app.route("/")
