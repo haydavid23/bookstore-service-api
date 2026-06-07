@@ -1,9 +1,12 @@
 from flask import Blueprint, jsonify, request
 
+from extensions import db
+from models import Book, Author, BookAuthor, Genre, BookGenre
+
 
 # Book Browsing Blueprint
 # The url_prefix means the main route for this file is /books.
-bookbrowsing_bp = Blueprint("bookbrowsing", __name__, url_prefix="/books")
+book_catalog_bp = Blueprint("book_catalog", __name__, url_prefix="/book_catalog")
 
 
 # Small mock book list for testing before connecting the database.
@@ -81,8 +84,7 @@ def count_books_sold():
     return totals
 
 
-@bookbrowsing_bp.route("", methods=["GET"])
-@bookbrowsing_bp.route("/", methods=["GET"])
+@book_catalog_bp.route("/", methods=["GET"])
 def get_books():
     """GET /books returns mock books filtered and sorted by query parameters."""
     # request.args is the DTO from the user for this simple blueprint.
@@ -90,7 +92,50 @@ def get_books():
     min_rating = request.args.get("min_rating")
     sort = request.args.get("sort")
 
-    books = [book.copy() for book in MOCK_BOOKS]
+    # Query all books joined with their author and genre via the join tables.
+    # Mirrors:
+    #   SELECT b.id, b.isbn, b.name, b.description, b.price, b.year_published,
+    #          a.name || ' ' || a.lastname AS author, g.genre
+    #   FROM book b
+    #     JOIN bookauthor ba ON b.id = ba.book_id
+    #     JOIN author a      ON a.id = ba.author_id
+    #     JOIN book_genre bg ON b.id = bg.book_id
+    #     JOIN genre g       ON g.id = bg.genre_id
+    rows = (
+        db.session.query(
+            Book.id,
+            Book.isbn,
+            Book.name,
+            Book.description,
+            Book.price,
+            Book.year_published,
+            (Author.name + " " + Author.lastname).label("author"),
+            Genre.genre.label("genre"),
+        )
+        .join(BookAuthor, Book.id == BookAuthor.book_id)
+        .join(Author, Author.id == BookAuthor.author_id)
+        .join(BookGenre, Book.id == BookGenre.book_id)
+        .join(Genre, Genre.id == BookGenre.genre_id)
+        .all()
+    )
+
+    books = [
+        {
+            "id": row.id,
+            "isbn": row.isbn,
+            "name": row.name,
+            "description": row.description,
+            "price": float(row.price) if row.price is not None else None,
+            "year_published": (
+                float(row.year_published)
+                if row.year_published is not None
+                else None
+            ),
+            "author": row.author,
+            "genre": row.genre,
+        }
+        for row in rows
+    ]
 
     if genre:
         books = [book for book in books if book["genre"].lower() == genre.lower()]

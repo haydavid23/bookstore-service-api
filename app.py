@@ -1,9 +1,9 @@
 from flask import Flask, request, jsonify
-from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
 import os
 
-from blueprints.bookbrowsing import bookbrowsing_bp
+from extensions import db
+from blueprints.book_catalog.book_catalog import book_catalog_bp
 from blueprints.profile import profile_bp
 
 load_dotenv()
@@ -11,9 +11,9 @@ load_dotenv()
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 
-db = SQLAlchemy(app)
+db.init_app(app)
 
-app.register_blueprint(bookbrowsing_bp)
+app.register_blueprint(book_catalog_bp)
 app.register_blueprint(profile_bp)
 
 
