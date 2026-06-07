@@ -3,6 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
 import os
 
+from blueprints.bookbrowsing import bookbrowsing_bp
 from blueprints.profile import profile_bp
 
 load_dotenv()
@@ -12,6 +13,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 
 db = SQLAlchemy(app)
 
+app.register_blueprint(bookbrowsing_bp)
 app.register_blueprint(profile_bp)
 
 
