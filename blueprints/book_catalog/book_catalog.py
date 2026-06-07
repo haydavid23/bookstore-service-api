@@ -3,7 +3,7 @@ from flask import Blueprint, jsonify, request
 
 # Book Browsing Blueprint
 # The url_prefix means the main route for this file is /books.
-bookbrowsing_bp = Blueprint("bookbrowsing", __name__, url_prefix="/books")
+book_catalog_bp = Blueprint("book_catalog", __name__, url_prefix="/book_catalog")
 
 
 # Small mock book list for testing before connecting the database.
@@ -81,8 +81,7 @@ def count_books_sold():
     return totals
 
 
-@bookbrowsing_bp.route("", methods=["GET"])
-@bookbrowsing_bp.route("/", methods=["GET"])
+@book_catalog_bp.route("/", methods=["GET"])
 def get_books():
     """GET /books returns mock books filtered and sorted by query parameters."""
     # request.args is the DTO from the user for this simple blueprint.
