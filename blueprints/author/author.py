@@ -21,6 +21,7 @@ REQUIRED_FIELDS = ["name", "lastname", "bio"]
 MAX_LENGTHS = {"name": 100, "lastname": 100, "bio": 150}
 
 
+
 def validate_author_fields(data, partial=False):
     """Validate author input. Returns an error string, or None if valid.
 
