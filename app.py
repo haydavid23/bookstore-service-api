@@ -4,6 +4,7 @@ import os
 
 from extensions import db
 from blueprints.book_catalog.book_catalog import book_catalog_bp
+from blueprints.author.author import author_bp
 from blueprints.profile import profile_bp
 
 load_dotenv()
@@ -14,6 +15,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 db.init_app(app)
 
 app.register_blueprint(book_catalog_bp)
+app.register_blueprint(author_bp)
 app.register_blueprint(profile_bp)
 
 
