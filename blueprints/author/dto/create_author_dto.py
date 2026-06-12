@@ -2,18 +2,18 @@ from dataclasses import dataclass
 
 
 # DTO for the POST /authors request body.
-# Field constraints mirror the "author" table varchar sizes, plus the list of
-# publishers the author belongs to (many-to-many via author_publisher):
-#   name           string      max 100 chars
-#   lastname       string      max 100 chars
-#   bio            string      max 150 chars
-#   publisher_ids  list[int]   non-empty list of publisher ids to link to
+# Field constraints mirror the "author" table varchar sizes, plus the
+# publisher the author works with (author.publisher_id, NOT NULL):
+#   name          string  max 100 chars
+#   lastname      string  max 100 chars
+#   bio           string  max 150 chars
+#   publisher_id  int     id of the publisher the author works with
 @dataclass
 class CreateAuthorDTO:
     name: str
     lastname: str
     bio: str
-    publisher_ids: list
+    publisher_id: int
 
     # Max lengths mirror the varchar sizes in the database schema.
     MAX_LENGTHS = {"name": 100, "lastname": 100, "bio": 150}
@@ -36,19 +36,16 @@ class CreateAuthorDTO:
             if len(value) > max_len:
                 return None, f"{name} must be at most {max_len} characters."
 
-        # Validate publisher_ids as a non-empty list of integers (reject bools).
-        publisher_ids = data.get("publisher_ids")
-        if not isinstance(publisher_ids, list) or not publisher_ids:
-            return None, "publisher_ids must be a non-empty list of integers."
-        for pid in publisher_ids:
-            if not isinstance(pid, int) or isinstance(pid, bool):
-                return None, "publisher_ids must be a non-empty list of integers."
+        # Validate publisher_id as an integer (reject bools).
+        publisher_id = data.get("publisher_id")
+        if not isinstance(publisher_id, int) or isinstance(publisher_id, bool):
+            return None, "publisher_id must be an integer."
 
         dto = cls(
             name=data["name"],
             lastname=data["lastname"],
             bio=data["bio"],
-            publisher_ids=publisher_ids,
+            publisher_id=publisher_id,
         )
         return dto, None
 
@@ -58,5 +55,5 @@ class CreateAuthorDTO:
             "name": self.name,
             "lastname": self.lastname,
             "bio": self.bio,
-            "publisher_ids": self.publisher_ids,
+            "publisher_id": self.publisher_id,
         }

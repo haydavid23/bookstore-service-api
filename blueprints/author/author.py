@@ -1,8 +1,7 @@
 from flask import Blueprint, jsonify, request
-from sqlalchemy import func
 
 from extensions import db
-from models import Author, AuthorPublisher, Publisher
+from models import Author, Publisher
 from blueprints.author.dto.create_author_dto import CreateAuthorDTO
 from blueprints.author.dto.author_response_dto import AuthorResponseDTO
 
@@ -43,26 +42,21 @@ def validate_author_fields(data, partial=False):
 
 @author_bp.route("/", methods=["GET"])
 def get_authors():
-    """GET /authors returns each author with their publishers joined into one
-    comma-separated string.
+    """GET /authors returns each author with the name of their publisher.
 
     Mirrors:
-      SELECT a.id, a.name, a.lastname, STRING_AGG(p.name, ', ') AS publishers
+      SELECT a.id, a.name, a.lastname, p.name AS publisher
       FROM author a
-        JOIN author_publisher ap ON a.id = ap.author_id
-        JOIN publisher p         ON p.id = ap.publisher_id
-      GROUP BY a.id, a.name, a.lastname;
+        JOIN publisher p ON p.id = a.publisher_id;
     """
     rows = (
         db.session.query(
             Author.id,
             Author.name,
             Author.lastname,
-            func.string_agg(Publisher.name, ", ").label("publishers"),
+            Publisher.name.label("publisher"),
         )
-        .join(AuthorPublisher, Author.id == AuthorPublisher.author_id)
-        .join(Publisher, Publisher.id == AuthorPublisher.publisher_id)
-        .group_by(Author.id, Author.name, Author.lastname)
+        .join(Publisher, Publisher.id == Author.publisher_id)
         .all()
     )
 
@@ -73,23 +67,17 @@ def get_authors():
 
 @author_bp.route("/<int:author_id>", methods=["GET"])
 def get_author(author_id):
-    """GET /authors/<id> returns a single author with their publishers joined
-    into one comma-separated string (same shape as GET /authors).
-
-    Uses an outer join so an existing author with no publisher links still
-    returns (publishers is null); a 404 means the author id does not exist.
-    """
+    """GET /authors/<id> returns a single author with the name of their
+    publisher (same shape as GET /authors)."""
     row = (
         db.session.query(
             Author.id,
             Author.name,
             Author.lastname,
-            func.string_agg(Publisher.name, ", ").label("publishers"),
+            Publisher.name.label("publisher"),
         )
-        .outerjoin(AuthorPublisher, Author.id == AuthorPublisher.author_id)
-        .outerjoin(Publisher, Publisher.id == AuthorPublisher.publisher_id)
+        .join(Publisher, Publisher.id == Author.publisher_id)
         .filter(Author.id == author_id)
-        .group_by(Author.id, Author.name, Author.lastname)
         .first()
     )
 
@@ -101,12 +89,7 @@ def get_author(author_id):
 
 @author_bp.route("/", methods=["POST"])
 def create_author():
-    """POST /authors creates an author and links it to its publishers.
-
-    The author row and the author_publisher join rows are written in a single
-    transaction: flush the author to obtain its id, add a join row per
-    publisher, then commit once so a failure can never orphan the author.
-    """
+    """POST /authors creates an author with the publisher they work with."""
     dto, error = CreateAuthorDTO.from_request(request.get_json(silent=True))
     if error:
         return jsonify({"error": error}), 400
@@ -115,22 +98,13 @@ def create_author():
         name=dto.name,
         lastname=dto.lastname,
         bio=dto.bio,
+        publisher_id=dto.publisher_id,
     )
 
     db.session.add(author)
-    # Flush (not commit) to assign author.id without ending the transaction.
-    db.session.flush()
-
-    for publisher_id in dto.publisher_ids:
-        db.session.add(
-            AuthorPublisher(author_id=author.id, publisher_id=publisher_id)
-        )
-
     db.session.commit()
 
-    result = author.to_dict()
-    result["publisher_ids"] = dto.publisher_ids
-    return jsonify(result), 201
+    return jsonify(author.to_dict()), 201
 
 
 @author_bp.route("/<int:author_id>", methods=["PUT", "PATCH"])
