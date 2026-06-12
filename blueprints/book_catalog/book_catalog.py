@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 
 from extensions import db
-from models import Book, Author, BookAuthor, Genre, BookGenre
+from models import Book, Author, BookAuthor, Genre, BookGenre, Publisher
 
 
 # Book Browsing Blueprint
@@ -92,15 +92,17 @@ def get_books():
     min_rating = request.args.get("min_rating")
     sort = request.args.get("sort")
 
-    # Query all books joined with their author and genre via the join tables.
+    # Query all books joined with their author, genre and publisher.
+    # The publisher comes from the author (every author works with one publisher).
     # Mirrors:
     #   SELECT b.id, b.isbn, b.name, b.description, b.price, b.year_published,
-    #          a.name || ' ' || a.lastname AS author, g.genre
+    #          a.name || ' ' || a.lastname AS author, g.genre, p.name AS publisher
     #   FROM book b
     #     JOIN bookauthor ba ON b.id = ba.book_id
     #     JOIN author a      ON a.id = ba.author_id
     #     JOIN book_genre bg ON b.id = bg.book_id
     #     JOIN genre g       ON g.id = bg.genre_id
+    #     JOIN publisher p   ON p.id = a.publisher_id
     rows = (
         db.session.query(
             Book.id,
@@ -111,11 +113,13 @@ def get_books():
             Book.year_published,
             (Author.name + " " + Author.lastname).label("author"),
             Genre.genre.label("genre"),
+            Publisher.name.label("publisher"),
         )
         .join(BookAuthor, Book.id == BookAuthor.book_id)
         .join(Author, Author.id == BookAuthor.author_id)
         .join(BookGenre, Book.id == BookGenre.book_id)
         .join(Genre, Genre.id == BookGenre.genre_id)
+        .join(Publisher, Publisher.id == Author.publisher_id)
         .all()
     )
 
@@ -133,6 +137,7 @@ def get_books():
             ),
             "author": row.author,
             "genre": row.genre,
+            "publisher": row.publisher,
         }
         for row in rows
     ]

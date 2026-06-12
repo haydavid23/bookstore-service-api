@@ -3,16 +3,16 @@ from dataclasses import dataclass
 
 # DTO for a GET /authors response row.
 # Shape matches the get_authors query output:
-#   id          int   author id
-#   name        str   author first name
-#   lastname    str   author last name
-#   publishers  str   publisher names joined with ", " (STRING_AGG)
+#   id         int   author id
+#   name       str   author first name
+#   lastname   str   author last name
+#   publisher  str   name of the publisher the author works with
 @dataclass
 class AuthorResponseDTO:
     id: int
     name: str
     lastname: str
-    publishers: str
+    publisher: str
 
     @classmethod
     def from_row(cls, row):
@@ -21,7 +21,7 @@ class AuthorResponseDTO:
             id=row.id,
             name=row.name,
             lastname=row.lastname,
-            publishers=row.publishers,
+            publisher=row.publisher,
         )
 
     def to_dict(self):
@@ -30,5 +30,5 @@ class AuthorResponseDTO:
             "id": self.id,
             "name": self.name,
             "lastname": self.lastname,
-            "publishers": self.publishers,
+            "publisher": self.publisher,
         }
