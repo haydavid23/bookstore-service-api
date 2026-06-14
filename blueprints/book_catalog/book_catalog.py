@@ -1,109 +1,44 @@
 from flask import Blueprint, jsonify, request
+from sqlalchemy import func
 
 from extensions import db
-from models import Book, Author, BookAuthor, Genre, BookGenre, Publisher
+from models import Book, Author, BookAuthor, Genre, BookGenre, Publisher, Review
 
 
 # Book Browsing Blueprint
-# The url_prefix means the main route for this file is /books.
+# url_prefix means every route in this file lives under /book_catalog.
 book_catalog_bp = Blueprint("book_catalog", __name__, url_prefix="/book_catalog")
 
 
-# Small mock book list for testing before connecting the database.
-# Student note: this is temporary data. Later, these rows can come from the database or PostgreSQL instead.
-MOCK_BOOKS = [
-    {
-        "id": 1,
-        "ISBN": "9780143127741",
-        "Name": "The Martian",
-        "Description": "An astronaut must survive alone on Mars using science and creativity.",
-        "Publisher_ID": 1,
-        "price": 15.99,
-        "year_published": 2014,
-        "genre": "Science Fiction",
-        "average_rating": 4.7,
-    },
-    {
-        "id": 2,
-        "ISBN": "9780061120084",
-        "Name": "To Kill a Mockingbird",
-        "Description": "A classic story about justice, childhood, and empathy.",
-        "Publisher_ID": 2,
-        "price": 12.99,
-        "year_published": 1960,
-        "genre": "Fiction",
-        "average_rating": 4.8,
-    },
-    {
-        "id": 3,
-        "ISBN": "9780439708180",
-        "Name": "Harry Potter and the Sorcerer's Stone",
-        "Description": "A young wizard begins his first year at Hogwarts.",
-        "Publisher_ID": 3,
-        "price": 10.99,
-        "year_published": 1997,
-        "genre": "Fantasy",
-        "average_rating": 4.6,
-    },
-    {
-        "id": 4,
-        "ISBN": "9780735211292",
-        "Name": "Atomic Habits",
-        "Description": "A practical guide to building better habits every day.",
-        "Publisher_ID": 4,
-        "price": 18.99,
-        "year_published": 2018,
-        "genre": "Self Help",
-        "average_rating": 4.4,
-    },
-]
-
-
-# Mock ordered items show which books were bought.
-# Top sellers are counted from this list instead of a Book copies_sold field.
-ORDERED_ITEMS = [
-    {"book_id": 1, "quantity": 2},
-    {"book_id": 2, "quantity": 5},
-    {"book_id": 3, "quantity": 3},
-    {"book_id": 2, "quantity": 1},
-    {"book_id": 1, "quantity": 4},
-]
-
-
+# Sort values the endpoint understands.
 VALID_SORTS = {"price_asc", "price_desc", "rating_desc", "top_sellers"}
-
-
-def count_books_sold():
-    """Add up mock ordered item quantities by book id."""
-    totals = {}
-
-    for item in ORDERED_ITEMS:
-        book_id = item["book_id"]
-        totals[book_id] = totals.get(book_id, 0) + item["quantity"]
-
-    return totals
 
 
 @book_catalog_bp.route("/", methods=["GET"])
 def get_books():
-    """GET /books returns mock books filtered and sorted by query parameters."""
-    # request.args is the DTO from the user for this simple blueprint.
+    """GET /book_catalog/ returns live books, filtered and sorted by query params.
+
+    Query params (all optional):
+      genre       -> only books in this genre (case-insensitive)
+      min_rating  -> only books whose average review rating is >= this number
+      sort        -> price_asc, price_desc, rating_desc, or top_sellers
+    """
     genre = request.args.get("genre")
     min_rating = request.args.get("min_rating")
     sort = request.args.get("sort")
 
-    # Query all books joined with their author, genre and publisher.
-    # The publisher comes from the author (every author works with one publisher).
-    # Mirrors:
-    #   SELECT b.id, b.isbn, b.name, b.description, b.price, b.year_published,
-    #          a.name || ' ' || a.lastname AS author, g.genre, p.name AS publisher
-    #   FROM book b
-    #     JOIN bookauthor ba ON b.id = ba.book_id
-    #     JOIN author a      ON a.id = ba.author_id
-    #     JOIN book_genre bg ON b.id = bg.book_id
-    #     JOIN genre g       ON g.id = bg.genre_id
-    #     JOIN publisher p   ON p.id = a.publisher_id
-    rows = (
+    # Average review rating for one book. Correlated subquery so the author and
+    # genre joins below can't inflate the count. NULL when a book has no reviews.
+    avg_rating = (
+        db.session.query(func.avg(Review.rating))
+        .filter(Review.book_id == Book.id)
+        .correlate(Book)
+        .scalar_subquery()
+    )
+
+    # Join book -> author -> publisher and book -> genre.
+    # Publisher comes from the author (author.publisher_id).
+    query = (
         db.session.query(
             Book.id,
             Book.isbn,
@@ -114,14 +49,23 @@ def get_books():
             (Author.name + " " + Author.lastname).label("author"),
             Genre.genre.label("genre"),
             Publisher.name.label("publisher"),
+            avg_rating.label("average_rating"),
         )
         .join(BookAuthor, Book.id == BookAuthor.book_id)
         .join(Author, Author.id == BookAuthor.author_id)
         .join(BookGenre, Book.id == BookGenre.book_id)
         .join(Genre, Genre.id == BookGenre.genre_id)
         .join(Publisher, Publisher.id == Author.publisher_id)
-        .all()
+        # distinct() drops exact duplicate rows. A book with several authors or
+        # genres can still appear once per author/genre (the join's nature).
+        .distinct()
     )
+
+    # Genre filter runs in the database (case-insensitive). Unknown genre -> no rows.
+    if genre:
+        query = query.filter(func.lower(Genre.genre) == genre.strip().lower())
+
+    rows = query.all()
 
     books = [
         {
@@ -131,20 +75,22 @@ def get_books():
             "description": row.description,
             "price": float(row.price) if row.price is not None else None,
             "year_published": (
-                float(row.year_published)
-                if row.year_published is not None
-                else None
+                float(row.year_published) if row.year_published is not None else None
             ),
             "author": row.author,
             "genre": row.genre,
             "publisher": row.publisher,
+            "average_rating": (
+                round(float(row.average_rating), 2)
+                if row.average_rating is not None
+                else None
+            ),
         }
         for row in rows
     ]
 
-    if genre:
-        books = [book for book in books if book["genre"].lower() == genre.lower()]
-
+    # Rating filter: keep books whose average rating is >= the value.
+    # Books with no reviews (None) can't meet a threshold, so they drop out.
     if min_rating is not None:
         try:
             min_rating_value = float(min_rating)
@@ -152,8 +98,10 @@ def get_books():
             return jsonify({"error": "min_rating must be a number."}), 400
 
         books = [
-            book for book in books
-            if book["average_rating"] >= min_rating_value
+            book
+            for book in books
+            if book["average_rating"] is not None
+            and book["average_rating"] >= min_rating_value
         ]
 
     if sort is not None:
@@ -165,13 +113,22 @@ def get_books():
         elif sort == "price_desc":
             books.sort(key=lambda book: book["price"], reverse=True)
         elif sort == "rating_desc":
-            books.sort(key=lambda book: book["average_rating"], reverse=True)
+            # Unrated books (None) sort to the bottom.
+            books.sort(
+                key=lambda book: (
+                    book["average_rating"]
+                    if book["average_rating"] is not None
+                    else -1
+                ),
+                reverse=True,
+            )
         elif sort == "top_sellers":
-            sold_totals = count_books_sold()
-
-            for book in books:
-                book["total_sold"] = sold_totals.get(book["id"], 0)
-
-            books.sort(key=lambda book: book["total_sold"], reverse=True)
+            # Needs the ordered_items table, which is not in the live DB yet.
+            return (
+                jsonify(
+                    {"error": "Top sellers is not available until order data exists."}
+                ),
+                501,
+            )
 
     return jsonify({"books": books})
