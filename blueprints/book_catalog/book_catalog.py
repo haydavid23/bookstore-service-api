@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, request
 from sqlalchemy import func
 
 from extensions import db
-from models import Book, Author, BookAuthor, Genre, BookGenre, Publisher, Review
+from models import Book, Author, BookAuthor, Genre, BookGenre, Publisher, Review, AuthorPublisher
 
 
 # Book Browsing Blueprint
@@ -132,3 +132,66 @@ def get_books():
             )
 
     return jsonify({"books": books})
+
+
+@book_catalog_bp.route("/discount", methods=["PATCH"])
+def discount_by_publisher():
+    """PATCH /book_catalog/discount lowers the price of every book from one publisher.
+
+    JSON body:
+      publisher         -> publisher name (required)
+      discount_percent  -> number 0-100 (required), percent off each price
+    """
+    data = request.get_json(silent=True) or {}
+    publisher_name = data.get("publisher")
+    discount_percent = data.get("discount_percent")
+
+    # Publisher name must be a non-empty string.
+    if not isinstance(publisher_name, str) or not publisher_name.strip():
+        return jsonify({"error": "publisher is required."}), 400
+
+    # discount_percent must be a number between 0 and 100.
+    try:
+        discount_value = float(discount_percent)
+    except (TypeError, ValueError):
+        return jsonify({"error": "discount_percent must be a number."}), 400
+    if discount_value < 0 or discount_value > 100:
+        return jsonify({"error": "discount_percent must be between 0 and 100."}), 400
+
+    # Look up the publisher by name (case-insensitive).
+    publisher = (
+        Publisher.query.filter(
+            func.lower(Publisher.name) == publisher_name.strip().lower()
+        ).first()
+    )
+    if publisher is None:
+        return jsonify({"error": "Publisher not found."}), 404
+
+    # Books link to a publisher through their author:
+    #   book -> bookauthor -> author_publisher -> publisher
+    # distinct() so a book with two matching authors is only counted once.
+    books = (
+        Book.query.join(BookAuthor, Book.id == BookAuthor.book_id)
+        .join(AuthorPublisher, AuthorPublisher.author_id == BookAuthor.author_id)
+        .filter(AuthorPublisher.publisher_id == publisher.id)
+        .distinct()
+        .all()
+    )
+
+    # Apply the discount: new price = price * (1 - percent/100).
+    multiplier = 1 - (discount_value / 100)
+    for book in books:
+        if book.price is not None:
+            book.price = round(float(book.price) * multiplier, 2)
+    db.session.commit()
+
+    return (
+        jsonify(
+            {
+                "publisher": publisher.name,
+                "discount_percent": discount_value,
+                "books_updated": len(books),
+            }
+        ),
+        200,
+    )
