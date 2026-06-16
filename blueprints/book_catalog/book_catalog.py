@@ -92,9 +92,6 @@ def get_books():
         .join(Publisher, Publisher.id == AuthorPublisher.publisher_id)
         .join(BookGenre, Book.id == BookGenre.book_id)
         .join(Genre, Genre.id == BookGenre.genre_id)
-        # distinct() drops exact duplicate rows. A book with several authors or
-        # genres can still appear once per author/genre (the join's nature).
-        .distinct()
     )
 
     if sort == "top_sellers":
