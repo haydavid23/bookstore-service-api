@@ -5,7 +5,7 @@ import os
 from extensions import db
 from blueprints.book_catalog.book_catalog import book_catalog_bp
 from blueprints.author.author import author_bp
-from blueprints.profile import profile_bp
+from blueprints.profile.profile import profile_bp
 from blueprints.wishlist.wishlist import wishlist_bp
 from blueprints.review.review import review_bp
 
