@@ -1,7 +1,8 @@
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from flask import Blueprint, jsonify, request
-from sqlalchemy import func
+from sqlalchemy import func, literal_column
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.exc import SQLAlchemyError
 
 from extensions import db
@@ -71,8 +72,71 @@ def get_books():
         .scalar_subquery()
     )
 
-    # Join book -> author -> author_publisher -> publisher and book -> genre.
-    # Publisher comes from the real author/publisher mapping table.
+    # Each book must come back as exactly ONE row, so authors, genres, and
+    # publishers are pre-aggregated in their own subqueries (one row per
+    # book_id) and LEFT JOINed onto book. Joining book_author and book_genre in
+    # the same flat query would multiply the two sets together -- a 3-author,
+    # 2-genre book would otherwise yield 6 rows with duplicated values.
+    author_full_name = Author.name + " " + Author.lastname
+
+    # Authors per book, combined alphabetically into a single field.
+    authors_subq = (
+        db.session.query(
+            BookAuthor.book_id.label("book_id"),
+            func.string_agg(
+                author_full_name,
+                aggregate_order_by(literal_column("', '"), author_full_name),
+            ).label("authors"),
+        )
+        .join(Author, Author.id == BookAuthor.author_id)
+        .group_by(BookAuthor.book_id)
+        .subquery()
+    )
+
+    # Genres per book, combined alphabetically into a single field.
+    genres_subq = (
+        db.session.query(
+            BookGenre.book_id.label("book_id"),
+            func.string_agg(
+                Genre.genre,
+                aggregate_order_by(literal_column("', '"), Genre.genre),
+            ).label("genres"),
+        )
+        .join(Genre, Genre.id == BookGenre.genre_id)
+        .group_by(BookGenre.book_id)
+        .subquery()
+    )
+
+    # Publishers per book via the author -> author_publisher mapping. Distinct
+    # first (several of a book's authors can share one publisher), then combined
+    # alphabetically so this aggregate is also one row per book.
+    book_publishers = (
+        db.session.query(
+            BookAuthor.book_id.label("book_id"),
+            Publisher.name.label("publisher_name"),
+        )
+        .join(AuthorPublisher, AuthorPublisher.author_id == BookAuthor.author_id)
+        .join(Publisher, Publisher.id == AuthorPublisher.publisher_id)
+        .distinct()
+        .subquery()
+    )
+    publishers_subq = (
+        db.session.query(
+            book_publishers.c.book_id.label("book_id"),
+            func.string_agg(
+                book_publishers.c.publisher_name,
+                aggregate_order_by(
+                    literal_column("', '"), book_publishers.c.publisher_name
+                ),
+            ).label("publishers"),
+        )
+        .group_by(book_publishers.c.book_id)
+        .subquery()
+    )
+
+    # LEFT JOIN each aggregate so books with no authors, genres, or publishers
+    # are still returned (those fields come back NULL). Every subquery has one
+    # row per book_id, so the joins stay one-to-one and nothing is duplicated.
     query = (
         db.session.query(
             Book.id,
@@ -81,25 +145,30 @@ def get_books():
             Book.description,
             Book.price,
             Book.year_published,
-            (Author.name + " " + Author.lastname).label("author"),
-            Genre.genre.label("genre"),
-            Publisher.name.label("publisher"),
+            authors_subq.c.authors.label("author"),
+            genres_subq.c.genres.label("genre"),
+            publishers_subq.c.publishers.label("publisher"),
             avg_rating.label("average_rating"),
         )
-        .join(BookAuthor, Book.id == BookAuthor.book_id)
-        .join(Author, Author.id == BookAuthor.author_id)
-        .join(AuthorPublisher, AuthorPublisher.author_id == Author.id)
-        .join(Publisher, Publisher.id == AuthorPublisher.publisher_id)
-        .join(BookGenre, Book.id == BookGenre.book_id)
-        .join(Genre, Genre.id == BookGenre.genre_id)
+        .outerjoin(authors_subq, authors_subq.c.book_id == Book.id)
+        .outerjoin(genres_subq, genres_subq.c.book_id == Book.id)
+        .outerjoin(publishers_subq, publishers_subq.c.book_id == Book.id)
     )
 
     if sort == "top_sellers":
         query = query.filter(Book.id.in_(list(sales_by_book_id)))
 
-    # Genre filter runs in the database (case-insensitive). Unknown genre -> no rows.
+    # Genre filter runs in the database (case-insensitive). EXISTS keeps each
+    # book a single row instead of re-joining the genre table. Unknown genre -> no rows.
     if genre:
-        query = query.filter(func.lower(Genre.genre) == genre.strip().lower())
+        genre_match = (
+            db.session.query(BookGenre.book_id)
+            .join(Genre, Genre.id == BookGenre.genre_id)
+            .filter(BookGenre.book_id == Book.id)
+            .filter(func.lower(Genre.genre) == genre.strip().lower())
+            .exists()
+        )
+        query = query.filter(genre_match)
 
     rows = query.all()
 
