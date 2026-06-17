@@ -133,15 +133,30 @@ def _genre_exists_filter(genre):
     )
 
 
-def fetch_catalog_rows(*, genre=None, book_ids=None):
+def _author_exists_filter(author_id):
+    """EXISTS clause matching books written by the given author id.
+
+    Like the genre filter, this keeps each book a single row instead of
+    re-joining the author tables into the main query.
+    """
+    return (
+        db.session.query(BookAuthor.book_id)
+        .filter(BookAuthor.book_id == Book.id)
+        .filter(BookAuthor.author_id == author_id)
+        .exists()
+    )
+
+
+def fetch_catalog_rows(*, genre=None, author_id=None, book_ids=None):
     """Run the catalog query and return raw rows (exactly one per book).
 
     authors, genres, and publishers are pre-aggregated into one row per book_id
     and LEFT JOINed onto book, so books with no authors/genres/publishers are
     still returned (those fields come back NULL) and nothing is duplicated.
 
-    genre     -> optional case-insensitive genre filter.
-    book_ids  -> optional iterable restricting the result to these book ids.
+    genre      -> optional case-insensitive genre filter.
+    author_id  -> optional author id; only books by this author are returned.
+    book_ids   -> optional iterable restricting the result to these book ids.
     """
     avg_rating = _average_rating_subquery()
     authors_subq = _authors_subquery()
@@ -171,6 +186,9 @@ def fetch_catalog_rows(*, genre=None, book_ids=None):
 
     if genre:
         query = query.filter(_genre_exists_filter(genre))
+
+    if author_id is not None:
+        query = query.filter(_author_exists_filter(author_id))
 
     return query.all()
 

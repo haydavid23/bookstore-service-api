@@ -31,15 +31,24 @@ def get_books():
 
     Query params (all optional):
       genre       -> only books in this genre (case-insensitive)
+      author      -> only books by this author id
       min_rating  -> only books whose average review rating is >= this number
       sort        -> price_asc, price_desc, rating_desc, or top_sellers
     """
     genre = request.args.get("genre")
+    author = request.args.get("author")
     min_rating = request.args.get("min_rating")
     sort = request.args.get("sort")
 
     if sort is not None and sort not in VALID_SORTS:
         return jsonify({"error": "Unsupported sort value."}), 400
+
+    author_id = None
+    if author is not None:
+        try:
+            author_id = int(author)
+        except ValueError:
+            return jsonify({"error": "author must be an integer id."}), 400
 
     sales_by_book_id = {}
     book_ids = None
@@ -49,7 +58,7 @@ def get_books():
             return jsonify({"books": []}), 200
         book_ids = list(sales_by_book_id)
 
-    rows = fetch_catalog_rows(genre=genre, book_ids=book_ids)
+    rows = fetch_catalog_rows(genre=genre, author_id=author_id, book_ids=book_ids)
     books = [serialize_book(row) for row in rows]
 
     # Rating filter happens in Python because average_rating is a subquery value.
