@@ -89,6 +89,7 @@ def get_book_by_isbn(isbn):
 
 
 
+
 @book_catalog_bp.route("/discount", methods=["PATCH"])
 def discount_by_publisher():
     """PATCH /book_catalog/discount lowers the price of every book from one publisher.
