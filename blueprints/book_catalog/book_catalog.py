@@ -74,6 +74,21 @@ def get_books():
     return jsonify({"books": books})
 
 
+@book_catalog_bp.route("/isbn/<isbn>", methods=["GET"])
+def get_book_by_isbn(isbn):
+    """GET /book_catalog/isbn/<isbn> returns the single book with that ISBN.
+
+    ISBN is unique, so this matches at most one book. Responds 404 when no book
+    has the given ISBN.
+    """
+    rows = fetch_catalog_rows(isbn=isbn)
+    if not rows:
+        return jsonify({"error": "Book not found."}), 404
+
+    return jsonify({"book": serialize_book(rows[0])})
+
+
+
 @book_catalog_bp.route("/discount", methods=["PATCH"])
 def discount_by_publisher():
     """PATCH /book_catalog/discount lowers the price of every book from one publisher.
