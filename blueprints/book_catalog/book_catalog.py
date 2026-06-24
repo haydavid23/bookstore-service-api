@@ -1,177 +1,128 @@
 from flask import Blueprint, jsonify, request
+from sqlalchemy.exc import SQLAlchemyError
 
 from extensions import db
-from models import Book, Author, BookAuthor, Genre, BookGenre, Publisher
+from blueprints.book_catalog.service import (
+    apply_publisher_discount,
+    fetch_catalog_rows,
+    find_publisher_by_name,
+    top_seller_counts,
+)
+from blueprints.book_catalog.utils import (
+    filter_by_min_rating,
+    serialize_book,
+    sort_books,
+    validate_discount_input,
+)
 
 
 # Book Browsing Blueprint
-# The url_prefix means the main route for this file is /books.
+# url_prefix means every route in this file lives under /book_catalog.
 book_catalog_bp = Blueprint("book_catalog", __name__, url_prefix="/book_catalog")
 
 
-# Small mock book list for testing before connecting the database.
-# Student note: this is temporary data. Later, these rows can come from the database or PostgreSQL instead.
-MOCK_BOOKS = [
-    {
-        "id": 1,
-        "ISBN": "9780143127741",
-        "Name": "The Martian",
-        "Description": "An astronaut must survive alone on Mars using science and creativity.",
-        "Publisher_ID": 1,
-        "price": 15.99,
-        "year_published": 2014,
-        "genre": "Science Fiction",
-        "average_rating": 4.7,
-    },
-    {
-        "id": 2,
-        "ISBN": "9780061120084",
-        "Name": "To Kill a Mockingbird",
-        "Description": "A classic story about justice, childhood, and empathy.",
-        "Publisher_ID": 2,
-        "price": 12.99,
-        "year_published": 1960,
-        "genre": "Fiction",
-        "average_rating": 4.8,
-    },
-    {
-        "id": 3,
-        "ISBN": "9780439708180",
-        "Name": "Harry Potter and the Sorcerer's Stone",
-        "Description": "A young wizard begins his first year at Hogwarts.",
-        "Publisher_ID": 3,
-        "price": 10.99,
-        "year_published": 1997,
-        "genre": "Fantasy",
-        "average_rating": 4.6,
-    },
-    {
-        "id": 4,
-        "ISBN": "9780735211292",
-        "Name": "Atomic Habits",
-        "Description": "A practical guide to building better habits every day.",
-        "Publisher_ID": 4,
-        "price": 18.99,
-        "year_published": 2018,
-        "genre": "Self Help",
-        "average_rating": 4.4,
-    },
-]
-
-
-# Mock ordered items show which books were bought.
-# Top sellers are counted from this list instead of a Book copies_sold field.
-ORDERED_ITEMS = [
-    {"book_id": 1, "quantity": 2},
-    {"book_id": 2, "quantity": 5},
-    {"book_id": 3, "quantity": 3},
-    {"book_id": 2, "quantity": 1},
-    {"book_id": 1, "quantity": 4},
-]
-
-
+# Sort values the endpoint understands.
 VALID_SORTS = {"price_asc", "price_desc", "rating_desc", "top_sellers"}
-
-
-def count_books_sold():
-    """Add up mock ordered item quantities by book id."""
-    totals = {}
-
-    for item in ORDERED_ITEMS:
-        book_id = item["book_id"]
-        totals[book_id] = totals.get(book_id, 0) + item["quantity"]
-
-    return totals
 
 
 @book_catalog_bp.route("/", methods=["GET"])
 def get_books():
-    """GET /books returns mock books filtered and sorted by query parameters."""
-    # request.args is the DTO from the user for this simple blueprint.
+    """GET /book_catalog/ returns live books, filtered and sorted by query params.
+
+    Query params (all optional):
+      genre       -> only books in this genre (case-insensitive)
+      author      -> only books by this author id
+      min_rating  -> only books whose average review rating is >= this number
+      sort        -> price_asc, price_desc, rating_desc, or top_sellers
+    """
     genre = request.args.get("genre")
+    author = request.args.get("author")
     min_rating = request.args.get("min_rating")
     sort = request.args.get("sort")
 
-    # Query all books joined with their author, genre and publisher.
-    # The publisher comes from the author (every author works with one publisher).
-    # Mirrors:
-    #   SELECT b.id, b.isbn, b.name, b.description, b.price, b.year_published,
-    #          a.name || ' ' || a.lastname AS author, g.genre, p.name AS publisher
-    #   FROM book b
-    #     JOIN bookauthor ba ON b.id = ba.book_id
-    #     JOIN author a      ON a.id = ba.author_id
-    #     JOIN book_genre bg ON b.id = bg.book_id
-    #     JOIN genre g       ON g.id = bg.genre_id
-    #     JOIN publisher p   ON p.id = a.publisher_id
-    rows = (
-        db.session.query(
-            Book.id,
-            Book.isbn,
-            Book.name,
-            Book.description,
-            Book.price,
-            Book.year_published,
-            (Author.name + " " + Author.lastname).label("author"),
-            Genre.genre.label("genre"),
-            Publisher.name.label("publisher"),
-        )
-        .join(BookAuthor, Book.id == BookAuthor.book_id)
-        .join(Author, Author.id == BookAuthor.author_id)
-        .join(BookGenre, Book.id == BookGenre.book_id)
-        .join(Genre, Genre.id == BookGenre.genre_id)
-        .join(Publisher, Publisher.id == Author.publisher_id)
-        .all()
-    )
+    if sort is not None and sort not in VALID_SORTS:
+        return jsonify({"error": "Unsupported sort value."}), 400
 
-    books = [
-        {
-            "id": row.id,
-            "isbn": row.isbn,
-            "name": row.name,
-            "description": row.description,
-            "price": float(row.price) if row.price is not None else None,
-            "year_published": (
-                float(row.year_published)
-                if row.year_published is not None
-                else None
-            ),
-            "author": row.author,
-            "genre": row.genre,
-            "publisher": row.publisher,
-        }
-        for row in rows
-    ]
+    author_id = None
+    if author is not None:
+        try:
+            author_id = int(author)
+        except ValueError:
+            return jsonify({"error": "author must be an integer id."}), 400
 
-    if genre:
-        books = [book for book in books if book["genre"].lower() == genre.lower()]
+    sales_by_book_id = {}
+    book_ids = None
+    if sort == "top_sellers":
+        sales_by_book_id = top_seller_counts()
+        if not sales_by_book_id:
+            return jsonify({"books": []}), 200
+        book_ids = list(sales_by_book_id)
 
+    rows = fetch_catalog_rows(genre=genre, author_id=author_id, book_ids=book_ids)
+    books = [serialize_book(row) for row in rows]
+
+    # Rating filter happens in Python because average_rating is a subquery value.
     if min_rating is not None:
         try:
             min_rating_value = float(min_rating)
         except ValueError:
             return jsonify({"error": "min_rating must be a number."}), 400
+        books = filter_by_min_rating(books, min_rating_value)
 
-        books = [
-            book for book in books
-            if book["average_rating"] >= min_rating_value
-        ]
-
-    if sort is not None:
-        if sort not in VALID_SORTS:
-            return jsonify({"error": "Unsupported sort value."}), 400
-
-        if sort == "price_asc":
-            books.sort(key=lambda book: book["price"])
-        elif sort == "price_desc":
-            books.sort(key=lambda book: book["price"], reverse=True)
-        elif sort == "rating_desc":
-            books.sort(key=lambda book: book["average_rating"], reverse=True)
-        elif sort == "top_sellers":
-            sold_totals = count_books_sold()
-
-            for book in books:
-                book["total_sold"] = sold_totals.get(book["id"], 0)
-
-            books.sort(key=lambda book: book["total_sold"], reverse=True)
+    books = sort_books(books, sort, sales_by_book_id)
 
     return jsonify({"books": books})
+
+
+@book_catalog_bp.route("/isbn/<isbn>", methods=["GET"])
+def get_book_by_isbn(isbn):
+    """GET /book_catalog/isbn/<isbn> returns the single book with that ISBN.
+
+    ISBN is unique, so this matches at most one book. Responds 404 when no book
+    has the given ISBN.
+    """
+    rows = fetch_catalog_rows(isbn=isbn)
+    if not rows:
+        return jsonify({"error": "Book not found."}), 404
+
+    return jsonify({"book": serialize_book(rows[0])})
+
+
+
+
+@book_catalog_bp.route("/discount", methods=["PATCH"])
+def discount_by_publisher():
+    """PATCH /book_catalog/discount lowers the price of every book from one publisher.
+
+    JSON body:
+      publisher         -> publisher name (required)
+      discount_percent  -> number 0-100 (required), percent off each price
+    """
+    data = request.get_json(silent=True) or {}
+    publisher_name = data.get("publisher")
+    discount_percent = data.get("discount_percent")
+
+    discount_value, error = validate_discount_input(publisher_name, discount_percent)
+    if error:
+        return jsonify({"error": error}), 400
+
+    publisher = find_publisher_by_name(publisher_name)
+    if publisher is None:
+        return jsonify({"error": "Publisher not found."}), 404
+
+    try:
+        books_updated = apply_publisher_discount(publisher.id, discount_value)
+    except SQLAlchemyError:
+        db.session.rollback()
+        return jsonify({"error": "Failed to apply discount."}), 500
+
+    return (
+        jsonify(
+            {
+                "publisher": publisher.name,
+                "discount_percent": float(discount_value),
+                "books_updated": books_updated,
+            }
+        ),
+        200,
+    )
