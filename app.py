@@ -8,6 +8,7 @@ from blueprints.author.author import author_bp
 from blueprints.profile.profile import profile_bp
 from blueprints.wishlist.wishlist import wishlist_bp
 from blueprints.review.review import review_bp
+from blueprints.shopping_cart import shopping_cart_bp
 
 load_dotenv()
 
@@ -21,6 +22,7 @@ app.register_blueprint(author_bp)
 app.register_blueprint(profile_bp)
 app.register_blueprint(wishlist_bp)
 app.register_blueprint(review_bp)
+app.register_blueprint(shopping_cart_bp)
 
 
 @app.route("/")
