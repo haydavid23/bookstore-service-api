@@ -35,6 +35,7 @@ def top_seller_counts():
             OrderedItem.book_id,
             sold_count.label("total_sold"),
         )
+        .filter(OrderedItem.order_date.isnot(None))
         .group_by(OrderedItem.book_id)
         .order_by(sold_count.desc())
         .all()
