@@ -1,4 +1,5 @@
 from flask import Blueprint, jsonify, request
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 from extensions import db
@@ -124,6 +125,40 @@ def update_review(review_id):
     db.session.commit()
 
     return jsonify(ReviewResponseDTO.from_model(review).to_dict())
+
+
+@review_bp.route("/books/<int:book_id>/summary", methods=["GET"])
+def get_book_review_summary(book_id):
+    """GET /reviews/books/<book_id>/summary returns rating stats for a book.
+
+    Returns average rating, total review count, and a breakdown of how many
+    reviews exist for each star value (1-5).
+    """
+    # Checks if the book exists by seeing if any reviews reference it
+    results = (
+        db.session.query(Review.rating, func.count(Review.id))
+        .filter(Review.book_id == book_id)
+        .group_by(Review.rating)
+        .all()
+    )
+
+    breakdown = {"1": 0, "2": 0, "3": 0, "4": 0, "5": 0}
+    total = 0
+    rating_sum = 0
+
+    for rating, count in results:
+        breakdown[str(rating)] = count
+        total += count
+        rating_sum += rating * count
+
+    average_rating = round(rating_sum / total, 2) if total > 0 else None
+
+    return jsonify({
+        "book_id": book_id,
+        "average_rating": average_rating,
+        "total_reviews": total,
+        "rating_breakdown": breakdown,
+    })
 
 
 @review_bp.route("/<int:review_id>", methods=["DELETE"])
