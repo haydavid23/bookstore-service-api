@@ -64,3 +64,47 @@ class ProfileResponseDTO:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass
+class UpdateProfileDTO:
+    updates: dict[str, str | None]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "UpdateProfileDTO":
+        allowed_fields = {
+            "username",
+            "first_name",
+            "last_name",
+            "address",
+            "password",
+        }
+
+        if "email" in data:
+            raise ValueError("email cannot be updated")
+
+        unexpected_fields = set(data) - allowed_fields
+
+        if unexpected_fields:
+            unexpected = ", ".join(sorted(unexpected_fields))
+            raise ValueError(f"Unexpected field(s): {unexpected}")
+
+        if not data:
+            raise ValueError("At least one user field is required")
+
+        updates: dict[str, str | None] = {}
+
+        for field, value in data.items():
+            if field == "address":
+                if value is not None and not isinstance(value, str):
+                    raise ValueError("address must be a string or null")
+
+                updates[field] = value.strip() if value else None
+                continue
+
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field} must be a non-empty string")
+
+            updates[field] = value.strip()
+
+        return cls(updates=updates)
