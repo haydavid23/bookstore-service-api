@@ -12,7 +12,7 @@ from sqlalchemy import func
 
 from extensions import db
 from models import (
-    AuthorPublisher,
+    Author,
     Book,
     BookAuthor,
     OrderedItem,
@@ -71,14 +71,14 @@ def find_publisher_by_name(name):
 def _books_for_publisher(publisher_id):
     """Books linked to a publisher through their authors.
 
-        book -> bookauthor -> author_publisher -> publisher
+        book -> bookauthor -> author -> publisher
 
     distinct() so a book with two matching authors is only returned once.
     """
     return (
         Book.query.join(BookAuthor, Book.id == BookAuthor.book_id)
-        .join(AuthorPublisher, AuthorPublisher.author_id == BookAuthor.author_id)
-        .filter(AuthorPublisher.publisher_id == publisher_id)
+        .join(Author, Author.id == BookAuthor.author_id)
+        .filter(Author.publisher_id == publisher_id)
         .distinct()
         .all()
     )
