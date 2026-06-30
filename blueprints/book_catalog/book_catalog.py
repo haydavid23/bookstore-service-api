@@ -58,9 +58,7 @@ def get_books():
         if not top_seller_rows:
             return jsonify({"books": []}), 200
 
-        sales_by_book_id = {
-            row.book_id: int(row.total_sold) for row in top_seller_rows
-        }
+        sales_by_book_id = {row.book_id: int(row.total_sold) for row in top_seller_rows}
 
     # Average review rating for one book. Correlated subquery so the author and
     # genre joins below can't inflate the count. NULL when a book has no reviews.
@@ -99,31 +97,54 @@ def get_books():
 
     # Genre filter runs in the database (case-insensitive). Unknown genre -> no rows.
     if genre:
-        query = query.filter(func.lower(Genre.genre) == genre.strip().lower())
+        matching_book_ids = (
+            db.session.query(BookGenre.book_id)
+            .join(Genre, Genre.id == BookGenre.genre_id)
+            .filter(func.lower(Genre.genre) == genre.strip().lower())
+        )
+        query = query.filter(Book.id.in_(matching_book_ids))
 
     rows = query.all()
 
-    books = [
-        {
-            "id": row.id,
-            "isbn": row.isbn,
-            "name": row.name,
-            "description": row.description,
-            "price": float(row.price) if row.price is not None else None,
-            "year_published": (
-                float(row.year_published) if row.year_published is not None else None
-            ),
-            "author": row.author,
-            "genre": row.genre,
-            "publisher": row.publisher,
-            "average_rating": (
-                round(float(row.average_rating), 2)
-                if row.average_rating is not None
-                else None
-            ),
-        }
-        for row in rows
-    ]
+    books_by_id = {}
+    for row in rows:
+        book = books_by_id.get(row.id)
+        if book is None:
+            book = {
+                "id": row.id,
+                "isbn": row.isbn,
+                "name": row.name,
+                "description": row.description,
+                "price": float(row.price) if row.price is not None else None,
+                "year_published": (
+                    float(row.year_published)
+                    if row.year_published is not None
+                    else None
+                ),
+                "author": [],
+                "genre": [],
+                "publisher": [],
+                "average_rating": (
+                    round(float(row.average_rating), 2)
+                    if row.average_rating is not None
+                    else None
+                ),
+            }
+            books_by_id[row.id] = book
+
+        if row.author is not None and row.author not in book["author"]:
+            book["author"].append(row.author)
+        if row.genre is not None and row.genre not in book["genre"]:
+            book["genre"].append(row.genre)
+        if row.publisher is not None and row.publisher not in book["publisher"]:
+            book["publisher"].append(row.publisher)
+
+    books = []
+    for book in books_by_id.values():
+        book["author"] = ", ".join(book["author"])
+        book["genre"] = ", ".join(book["genre"])
+        book["publisher"] = ", ".join(book["publisher"])
+        books.append(book)
 
     # Rating filter: keep books whose average rating is >= the value.
     # Books with no reviews (None) can't meet a threshold, so they drop out.
@@ -148,9 +169,7 @@ def get_books():
         # Unrated books (None) sort to the bottom.
         books.sort(
             key=lambda book: (
-                book["average_rating"]
-                if book["average_rating"] is not None
-                else -1
+                book["average_rating"] if book["average_rating"] is not None else -1
             ),
             reverse=True,
         )
@@ -200,11 +219,9 @@ def discount_by_publisher():
         return jsonify({"error": "discount_percent must be between 0 and 100."}), 400
 
     # Look up the publisher by name (case-insensitive).
-    publisher = (
-        Publisher.query.filter(
-            func.lower(Publisher.name) == publisher_name.strip().lower()
-        ).first()
-    )
+    publisher = Publisher.query.filter(
+        func.lower(Publisher.name) == publisher_name.strip().lower()
+    ).first()
     if publisher is None:
         return jsonify({"error": "Publisher not found."}), 404
 
