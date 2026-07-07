@@ -12,7 +12,6 @@ from sqlalchemy.dialects.postgresql import aggregate_order_by
 from extensions import db
 from models import (
     Author,
-    AuthorPublisher,
     Book,
     BookAuthor,
     BookGenre,
@@ -79,8 +78,8 @@ def _publishers_subquery():
             BookAuthor.book_id.label("book_id"),
             Publisher.name.label("publisher_name"),
         )
-        .join(AuthorPublisher, AuthorPublisher.author_id == BookAuthor.author_id)
-        .join(Publisher, Publisher.id == AuthorPublisher.publisher_id)
+        .join(Author, Author.id == BookAuthor.author_id)
+        .join(Publisher, Publisher.id == Author.publisher_id)
         .distinct()
         .subquery()
     )
