@@ -15,6 +15,8 @@ from models import (
     Author,
     Book,
     BookAuthor,
+    BookGenre,
+    Genre,
     OrderedItem,
     Publisher,
 )
@@ -59,6 +61,39 @@ def fetch_catalog_rows(*, genre=None, author_id=None, book_ids=None, isbn=None):
         genre=genre, author_id=author_id, book_ids=book_ids, isbn=isbn
     )
     return base_catalog_query().filter(*clauses).all()
+
+
+def find_author_by_id(author_id):
+    """Look up an author by id. None if not found."""
+    return db.session.get(Author, author_id)
+
+
+def find_genre_by_id(genre_id):
+    """Look up a genre by id. None if not found."""
+    return db.session.get(Genre, genre_id)
+
+
+def create_book(fields):
+    """Insert a new book row and link it to its author and genre.
+
+    fields is the dict returned by validate_new_book_input, which includes
+    author_id/genre_id alongside the Book columns. The book, its bookauthor
+    link, and its book_genre link are all committed in one transaction, so a
+    book is never left without an author or genre. Returns the created
+    Book. Raises SQLAlchemyError if the commit fails (the caller is
+    responsible for rollback).
+    """
+    link_ids = {"author_id": fields["author_id"], "genre_id": fields["genre_id"]}
+    book_fields = {key: value for key, value in fields.items() if key not in link_ids}
+
+    book = Book(**book_fields)
+    db.session.add(book)
+    db.session.flush()  # assigns book.id for the links below
+
+    db.session.add(BookAuthor(book_id=book.id, author_id=link_ids["author_id"]))
+    db.session.add(BookGenre(book_id=book.id, genre_id=link_ids["genre_id"]))
+    db.session.commit()
+    return book
 
 
 def find_publisher_by_name(name):
