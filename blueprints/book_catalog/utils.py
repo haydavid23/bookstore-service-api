@@ -80,6 +80,93 @@ def sort_books(books, sort, sales_by_book_id):
     return books
 
 
+BOOK_MAX_LENGTHS = {"isbn": 250, "name": 100, "description": 200}
+
+
+def _validate_non_negative_decimal(value, field_name):
+    """Validate a required non-negative numeric field.
+
+    Returns (Decimal, None) on success or (None, error_message) on failure.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None, f"{field_name} must be a number."
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None, f"{field_name} must be a number."
+    if not decimal_value.is_finite():
+        return None, f"{field_name} must be a number."
+    if decimal_value < Decimal("0"):
+        return None, f"{field_name} must be zero or greater."
+
+    return decimal_value, None
+
+
+def validate_new_book_input(data):
+    """Validate the POST /book_catalog request body.
+
+    Returns (fields, None) on success, where fields is a dict ready to
+    construct a Book plus the author_id/genre_id to link it to, or (None,
+    error_message) on failure. Required fields mirror the NOT NULL columns
+    on the "book" table: isbn, name, price, and year_published, plus
+    author_id (NOT NULL on bookauthor) and genre_id (NOT NULL on
+    book_genre) -- every book needs an author and a genre. description is
+    optional (nullable in the schema) and copies_sold defaults to 0 for a
+    newly created book.
+    """
+    if not isinstance(data, dict):
+        return None, "Invalid JSON body."
+
+    for field in ("isbn", "name"):
+        value = data.get(field)
+        if not isinstance(value, str) or not value.strip():
+            return None, f"{field} must be a non-empty string."
+        if len(value) > BOOK_MAX_LENGTHS[field]:
+            return None, f"{field} must be at most {BOOK_MAX_LENGTHS[field]} characters."
+
+    description = data.get("description")
+    if description is not None:
+        if not isinstance(description, str):
+            return None, "description must be a string."
+        if len(description) > BOOK_MAX_LENGTHS["description"]:
+            return None, "description must be at most 200 characters."
+
+    price, error = _validate_non_negative_decimal(data.get("price"), "price")
+    if error:
+        return None, error
+
+    year_published, error = _validate_non_negative_decimal(
+        data.get("year_published"), "year_published"
+    )
+    if error:
+        return None, error
+
+    copies_sold_input = data.get("copies_sold", 0)
+    copies_sold, error = _validate_non_negative_decimal(copies_sold_input, "copies_sold")
+    if error:
+        return None, error
+
+    author_id = data.get("author_id")
+    if not isinstance(author_id, int) or isinstance(author_id, bool):
+        return None, "author_id must be an integer."
+
+    genre_id = data.get("genre_id")
+    if not isinstance(genre_id, int) or isinstance(genre_id, bool):
+        return None, "genre_id must be an integer."
+
+    fields = {
+        "isbn": data["isbn"],
+        "name": data["name"],
+        "description": description,
+        "price": price,
+        "year_published": year_published,
+        "copies_sold": copies_sold,
+        "author_id": author_id,
+        "genre_id": genre_id,
+    }
+    return fields, None
+
+
 def validate_discount_input(publisher_name, discount_percent):
     """Validate the discount request body.
 

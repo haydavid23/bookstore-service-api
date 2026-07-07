@@ -19,6 +19,7 @@ class Book(db.Model):
     description = db.Column(db.String(200), nullable=True)
     price = db.Column(db.Numeric, nullable=False)
     year_published = db.Column(db.Numeric, nullable=False)
+    copies_sold = db.Column(db.Numeric, nullable=False)
 
     def to_dict(self):
         """Return a JSON-serializable dict of the book row."""

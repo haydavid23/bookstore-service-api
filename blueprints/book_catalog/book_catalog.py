@@ -4,7 +4,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from extensions import db
 from blueprints.book_catalog.service import (
     apply_publisher_discount,
+    create_book,
     fetch_catalog_rows,
+    find_author_by_id,
+    find_genre_by_id,
     find_publisher_by_name,
     top_seller_counts,
 )
@@ -13,6 +16,7 @@ from blueprints.book_catalog.utils import (
     serialize_book,
     sort_books,
     validate_discount_input,
+    validate_new_book_input,
 )
 
 
@@ -72,6 +76,49 @@ def get_books():
     books = sort_books(books, sort, sales_by_book_id)
 
     return jsonify({"books": books})
+
+
+@book_catalog_bp.route("/", methods=["POST"])
+def create_book_route():
+    """POST /book_catalog/ creates a new book.
+
+    JSON body:
+      isbn            -> string, required (max 250 chars)
+      name            -> string, required (max 100 chars)
+      description     -> string, optional (max 200 chars)
+      price           -> number, required, >= 0
+      year_published  -> number, required, >= 0
+      copies_sold     -> number, optional, >= 0 (defaults to 0)
+      author_id       -> integer, required, id of the book's author
+      genre_id        -> integer, required, id of the book's genre
+    """
+    data = request.get_json(silent=True)
+    fields, error = validate_new_book_input(data)
+    if error:
+        return jsonify({"error": error}), 400
+
+    if fetch_catalog_rows(isbn=fields["isbn"]):
+        return jsonify({"error": "A book with this ISBN already exists."}), 409
+
+    author = find_author_by_id(fields["author_id"])
+    if author is None:
+        return jsonify({"error": "Author not found."}), 404
+
+    genre = find_genre_by_id(fields["genre_id"])
+    if genre is None:
+        return jsonify({"error": "Genre not found."}), 404
+
+    try:
+        book = create_book(fields)
+    except SQLAlchemyError:
+        db.session.rollback()
+        return jsonify({"error": "Failed to create book."}), 500
+
+    response = book.to_dict()
+    response["author"] = f"{author.name} {author.lastname}"
+    response["genre"] = genre.genre
+
+    return jsonify(response), 201
 
 
 @book_catalog_bp.route("/isbn/<isbn>", methods=["GET"])
