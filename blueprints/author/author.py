@@ -4,6 +4,7 @@ from extensions import db
 from models import Author, Publisher
 from blueprints.author.dto.create_author_dto import CreateAuthorDTO
 from blueprints.author.dto.author_response_dto import AuthorResponseDTO
+from blueprints.author.validators import validate_publisher_id
 
 
 # Author Blueprint
@@ -93,6 +94,10 @@ def create_author():
     dto, error = CreateAuthorDTO.from_request(request.get_json(silent=True))
     if error:
         return jsonify({"error": error}), 400
+
+    error = validate_publisher_id(dto.publisher_id)
+    if error:
+        return jsonify({"error": error}), 404
 
     author = Author(
         name=dto.name,
