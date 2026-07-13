@@ -17,7 +17,6 @@ from models import (
     BookAuthor,
     BookGenre,
     Genre,
-    OrderedItem,
     Publisher,
 )
 
@@ -27,22 +26,19 @@ from blueprints.book_catalog.utils import compute_discounted_price
 
 
 def top_seller_counts():
-    """Return {book_id: total_sold} for every book that has been ordered.
+    """Return {book_id: copies_sold} for every book, ranked by copies_sold desc.
 
-    Empty dict when nothing has sold. The caller decides how to rank/cap.
+    Sales are tracked directly on book.copies_sold, so ranking reads that column
+    instead of counting ordered_items rows. Books with a NULL copies_sold are
+    skipped. The caller decides how to cap the ranked list.
     """
-    sold_count = func.count(OrderedItem.id)
     rows = (
-        db.session.query(
-            OrderedItem.book_id,
-            sold_count.label("total_sold"),
-        )
-        .filter(OrderedItem.order_date.isnot(None))
-        .group_by(OrderedItem.book_id)
-        .order_by(sold_count.desc())
+        db.session.query(Book.id, Book.copies_sold)
+        .filter(Book.copies_sold.isnot(None))
+        .order_by(Book.copies_sold.desc())
         .all()
     )
-    return {row.book_id: int(row.total_sold) for row in rows}
+    return {row.id: int(row.copies_sold) for row in rows}
 
 
 def fetch_catalog_rows(*, genre=None, author_id=None, book_ids=None, isbn=None):
