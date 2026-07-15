@@ -2,7 +2,7 @@
 
 Builds the enriched per-book SELECT used by the catalog: authors, genres, and
 publishers are each pre-aggregated into one row per book_id and LEFT JOINed onto
-book, and the average review rating comes in as a correlated scalar subquery.
+book, and the average rating comes in as a correlated scalar subquery.
 Keeping this here lets service.py stay thin orchestration.
 """
 
@@ -12,25 +12,24 @@ from sqlalchemy.dialects.postgresql import aggregate_order_by
 from extensions import db
 from models import (
     Author,
-    AuthorPublisher,
     Book,
     BookAuthor,
     BookGenre,
     Genre,
     Publisher,
-    Review,
+    Rating,
 )
 
 
 def _average_rating_subquery():
-    """Average review rating for one book as a correlated scalar subquery.
+    """Average rating for one book as a correlated scalar subquery.
 
     Correlated so the author/genre joins below can't inflate the count.
-    NULL when a book has no reviews.
+    NULL when a book has no ratings.
     """
     return (
-        db.session.query(func.avg(Review.rating))
-        .filter(Review.book_id == Book.id)
+        db.session.query(func.avg(Rating.rating))
+        .filter(Rating.book_id == Book.id)
         .correlate(Book)
         .scalar_subquery()
     )
@@ -79,8 +78,8 @@ def _publishers_subquery():
             BookAuthor.book_id.label("book_id"),
             Publisher.name.label("publisher_name"),
         )
-        .join(AuthorPublisher, AuthorPublisher.author_id == BookAuthor.author_id)
-        .join(Publisher, Publisher.id == AuthorPublisher.publisher_id)
+        .join(Author, Author.id == BookAuthor.author_id)
+        .join(Publisher, Publisher.id == Author.publisher_id)
         .distinct()
         .subquery()
     )
