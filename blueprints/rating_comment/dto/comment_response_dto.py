@@ -1,3 +1,4 @@
+from typing import Optional
 from dataclasses import dataclass
 from datetime import date
 
@@ -9,7 +10,7 @@ class CommentResponseDTO:
     book_id: int
     user_profile_id: int
     comment: str
-    created_at: date | None
+    created_at: Optional[date]
 
     @classmethod
     def from_model(cls, comment):
