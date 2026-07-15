@@ -1,3 +1,4 @@
+from typing import Any, Optional, Dict
 from dataclasses import dataclass
 from datetime import date
 
@@ -14,8 +15,8 @@ class CreateReviewDTO:
     book_id: int
     user_profile_id: int
     rating: int
-    comment: str | None
-    created_at: date | None
+    comment: Optional[str]
+    created_at: Optional[date]
 
     @classmethod
     def from_request(cls, data):

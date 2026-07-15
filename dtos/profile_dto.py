@@ -1,5 +1,5 @@
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, Optional, Dict
 
 
 @dataclass
@@ -9,10 +9,10 @@ class CreateProfileDTO:
     first_name: str
     last_name: str
     password: str
-    address: str | None = None
+    address: Optional[str] = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CreateProfileDTO":
+    def from_dict(cls, data: Dict[str, Any]) -> "CreateProfileDTO":
         required_fields = [
             "username",
             "email",
@@ -49,10 +49,10 @@ class ProfileResponseDTO:
     email: str
     first_name: str
     last_name: str
-    address: str | None = None
+    address: Optional[str] = None
 
     @classmethod
-    def from_row(cls, row: dict[str, Any]) -> "ProfileResponseDTO":
+    def from_row(cls, row: Dict[str, Any]) -> "ProfileResponseDTO":
         return cls(
             id=row["id"],
             username=row["username"],
@@ -62,16 +62,16 @@ class ProfileResponseDTO:
             last_name=row["last_name"],
         )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
 
 @dataclass
 class UpdateProfileDTO:
-    updates: dict[str, str | None]
+    updates: Dict[str, Optional[str]]
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "UpdateProfileDTO":
+    def from_dict(cls, data: Dict[str, Any]) -> "UpdateProfileDTO":
         allowed_fields = {
             "username",
             "first_name",
@@ -92,7 +92,7 @@ class UpdateProfileDTO:
         if not data:
             raise ValueError("At least one user field is required")
 
-        updates: dict[str, str | None] = {}
+        updates: Dict[str, Optional[str]] = {}
 
         for field, value in data.items():
             if field == "address":
