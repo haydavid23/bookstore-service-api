@@ -119,6 +119,7 @@ def base_catalog_query():
             Book.description,
             Book.price,
             Book.year_published,
+            Book.copies_sold,
             authors_subq.c.authors.label("author"),
             genres_subq.c.genres.label("genre"),
             publishers_subq.c.publishers.label("publisher"),
