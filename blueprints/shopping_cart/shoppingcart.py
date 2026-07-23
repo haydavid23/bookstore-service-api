@@ -1,4 +1,5 @@
 from flask import g, Blueprint, jsonify, request
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from extensions import db
 from auth import login_required
@@ -87,12 +88,22 @@ def add_cart_item(user_profile_id):
         )
         db.session.add(item)
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Book already exists in shopping cart"}), 409
+    except SQLAlchemyError:
+        db.session.rollback()
+        return jsonify({"error": "Database error while adding book to shopping cart"}), 500
 
     return jsonify({
         "message": "Book added to shopping cart",
         "cart_item": item.to_dict(),
     }), 201
+
+
+    
 
 @shopping_cart_bp.route("/users/<int:user_profile_id>/cart/items", methods=["GET"])
 @login_required
@@ -162,6 +173,11 @@ def delete_cart_item(user_profile_id, book_id):
       return jsonify({"error": "Book not found in shopping cart"}), 404
 
   db.session.delete(item)
-  db.session.commit()
+
+  try:
+      db.session.commit()
+  except SQLAlchemyError:
+      db.session.rollback()
+      return jsonify({"error": "Database error while removing book from shopping cart"}), 500
 
   return jsonify({"message": "Book removed from shopping cart"}), 200
