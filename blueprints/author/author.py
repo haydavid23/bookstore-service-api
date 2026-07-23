@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify, request
 
+from auth import login_required
 from extensions import db
 from models import Author, Publisher
 from blueprints.author.dto.create_author_dto import CreateAuthorDTO
@@ -42,6 +43,7 @@ def validate_author_fields(data, partial=False):
 
 
 @author_bp.route("/", methods=["GET"])
+@login_required
 def get_authors():
     """GET /authors returns each author with the name of their publisher.
 
