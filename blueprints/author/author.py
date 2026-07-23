@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
 
-from auth import login_required
+from auth import admin_required
 from extensions import db
 from models import Author, Publisher
 from blueprints.author.dto.create_author_dto import CreateAuthorDTO
@@ -92,7 +92,7 @@ def get_author(author_id):
 
 
 @author_bp.route("/", methods=["POST"])
-@login_required
+@admin_required
 def create_author():
     """POST /authors creates an author with the publisher they work with."""
     dto, error = CreateAuthorDTO.from_request(request.get_json(silent=True))
