@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, request
 from sqlalchemy.exc import SQLAlchemyError
 
+from auth import admin_required
 from extensions import db
 from blueprints.book_catalog.service import (
     apply_publisher_discount,
@@ -79,6 +80,7 @@ def get_books():
 
 
 @book_catalog_bp.route("/", methods=["POST"])
+@admin_required
 def create_book_route():
     """POST /book_catalog/ creates a new book.
 
