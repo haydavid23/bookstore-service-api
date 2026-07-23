@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify, request
 
+from auth import login_required
 from extensions import db
 from models import Author, Publisher
 from blueprints.author.dto.create_author_dto import CreateAuthorDTO
@@ -46,7 +47,7 @@ def get_authors():
     """GET /authors returns each author with the name of their publisher.
 
     Mirrors:
-      SELECT a.id, a.name, a.lastname, p.name AS publisher
+      SELECT a.id, a.name, a.lastname, a.bio, p.name AS publisher
       FROM author a
         JOIN publisher p ON p.id = a.publisher_id;
     """
@@ -55,6 +56,7 @@ def get_authors():
             Author.id,
             Author.name,
             Author.lastname,
+            Author.bio,
             Publisher.name.label("publisher"),
         )
         .join(Publisher, Publisher.id == Author.publisher_id)
@@ -75,6 +77,7 @@ def get_author(author_id):
             Author.id,
             Author.name,
             Author.lastname,
+            Author.bio,
             Publisher.name.label("publisher"),
         )
         .join(Publisher, Publisher.id == Author.publisher_id)
@@ -89,6 +92,7 @@ def get_author(author_id):
 
 
 @author_bp.route("/", methods=["POST"])
+@login_required
 def create_author():
     """POST /authors creates an author with the publisher they work with."""
     dto, error = CreateAuthorDTO.from_request(request.get_json(silent=True))
