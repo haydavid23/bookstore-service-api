@@ -23,6 +23,7 @@ def retrieve_subtotal(user_profile_id):
 
    subtotal = (
        db.session.query(db.func.sum(Book.price * CartItem.quantity))
+       .select_from(CartItem)
        .join(Book, Book.id == CartItem.book_id)
        .filter(CartItem.shopping_cart_id == cart.id)
        .scalar()
