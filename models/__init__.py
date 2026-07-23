@@ -9,6 +9,8 @@ from models.credit_card import CreditCard
 from models.rating import Rating
 from models.comment import Comment
 from models.ordered_item import OrderedItem
+from models.shopping_cart import ShoppingCart
+from models.cart_item import CartItem
 
 __all__ = [
     "Author",
@@ -22,4 +24,6 @@ __all__ = [
     "Rating",
     "Comment",
     "OrderedItem",
+    "ShoppingCart",
+    "CartItem",
 ]
