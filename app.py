@@ -1,5 +1,6 @@
 from flask import Flask, jsonify
 from dotenv import load_dotenv
+from sqlalchemy import text
 import os
 
 from extensions import db
@@ -28,6 +29,15 @@ app.register_blueprint(shopping_cart_bp)
 @app.route("/")
 def index():
     return jsonify({"message": "Welcome to BookDb"})
+
+
+@app.route("/testdb")
+def test_db():
+    try:
+        db.session.execute(text("SELECT 1"))
+        return jsonify({"status": "ok", "message": "Database connection successful"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 if __name__ == "__main__":

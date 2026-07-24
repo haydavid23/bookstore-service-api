@@ -1,8 +1,9 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 from extensions import db
+from auth import login_required
 from models import Comment, Rating
 from blueprints.rating_comment.dto.create_rating_dto import CreateRatingDTO
 from blueprints.rating_comment.dto.create_comment_dto import CreateCommentDTO
@@ -18,6 +19,7 @@ rating_comment_bp = Blueprint("rating_comment", __name__)
 
 
 @rating_comment_bp.route("/books/<int:book_id>/ratings", methods=["POST"])
+@login_required
 def create_rating(book_id):
     """Create a 1-5 star rating for a book by a user, stamped with today's date.
 
@@ -28,6 +30,12 @@ def create_rating(book_id):
     dto, error = CreateRatingDTO.from_request(request.get_json(silent=True), book_id)
     if error:
         return jsonify({"error": error}), 400
+
+    if (
+        g.current_user["user_id"] != dto.user_profile_id
+        and g.current_user["role"] != "admin"
+    ):
+        return jsonify({"error": "Cannot create a rating for another user"}), 403
 
     rating = Rating(
         book_id=dto.book_id,
@@ -47,6 +55,7 @@ def create_rating(book_id):
 
 
 @rating_comment_bp.route("/books/<int:book_id>/comments", methods=["POST"])
+@login_required
 def create_comment(book_id):
     """Create a comment for a book by a user, stamped with today's date.
 
@@ -57,6 +66,12 @@ def create_comment(book_id):
     dto, error = CreateCommentDTO.from_request(request.get_json(silent=True), book_id)
     if error:
         return jsonify({"error": error}), 400
+
+    if (
+        g.current_user["user_id"] != dto.user_profile_id
+        and g.current_user["role"] != "admin"
+    ):
+        return jsonify({"error": "Cannot create a comment for another user"}), 403
 
     comment = Comment(
         book_id=dto.book_id,
