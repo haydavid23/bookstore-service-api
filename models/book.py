@@ -34,6 +34,9 @@ class Book(db.Model):
                 if self.year_published is not None
                 else None
             ),
+            "copies_sold": (
+                int(self.copies_sold) if self.copies_sold is not None else None
+            ),
         }
 
     def __repr__(self):

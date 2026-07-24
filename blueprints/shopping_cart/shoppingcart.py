@@ -1,171 +1,184 @@
-from flask import Blueprint, jsonify, request
-from psycopg2.extras import RealDictCursor
-import os
-import psycopg2
+from flask import g, Blueprint, jsonify, request
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from extensions import db
+from auth import login_required
+from models import UserProfile, ShoppingCart, CartItem, Book
 shopping_cart_bp = Blueprint("shopping_cart", __name__)
 
+@shopping_cart_bp.route("/users/<int:user_profile_id>/cart/subtotal", methods=["GET"])
+@login_required
+def retrieve_subtotal(user_profile_id):
+   if g.current_user["user_id"] != user_profile_id and g.current_user["role"] != "admin":
+       return jsonify({"error": "Cannot access another user's cart"}), 403
+   user = UserProfile.query.get(user_profile_id)
 
-def db_conn():
-    """Open and return a connection to the configured PostgreSQL database."""
-    database_url = os.getenv("DATABASE_URL")
+   if not user:
+       return jsonify({"error": "User not found"}), 404
 
-    if not database_url:
-        raise RuntimeError("DATABASE_URL environment variable is not set")
+   cart = ShoppingCart.query.filter_by(user_profile_id=user_profile_id).first()
 
-    return psycopg2.connect(database_url)
+   if cart is None:
+       return jsonify({"user_profile_id": user_profile_id, "subtotal": 0}), 200
 
+   subtotal = (
+       db.session.query(db.func.sum(Book.price * CartItem.quantity))
+       .select_from(CartItem)
+       .join(Book, Book.id == CartItem.book_id)
+       .filter(CartItem.shopping_cart_id == cart.id)
+       .scalar()
+   )
 
-def require_int(data, field):
-    value = data.get(field)
+   return jsonify({
+       "user_profile_id": user_profile_id,
+       "subtotal": float(subtotal or 0)
+   }), 200
 
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise ValueError(f"{field} must be an integer")
+@shopping_cart_bp.route("/users/<int:user_profile_id>/cart/items", methods=["POST"])
+@login_required
+def add_cart_item(user_profile_id):
+    if (
+        g.current_user["user_id"] != user_profile_id
+        and g.current_user["role"] != "admin"
+    ):
+        return jsonify({"error": "Cannot access another user's cart"}), 403
 
-    return value
-
-
-def serialize_book(row):
-    return {
-        "id": row["id"],
-        "isbn": row["isbn"],
-        "name": row["name"],
-        "description": row["description"],
-        "price": float(row["price"]) if row["price"] is not None else None,
-        "year_published": (
-            float(row["year_published"])
-            if row["year_published"] is not None
-            else None
-        ),
-    }
-
-
-@shopping_cart_bp.route("/shopping-cart/items", methods=["POST"])
-def add_book_to_cart():
-    """Add a book to a user's shopping cart."""
     data = request.get_json(silent=True)
 
     if not isinstance(data, dict):
-        return jsonify({
-            "error": "Request body must be valid JSON"
-        }), 400
+        return jsonify({"error": "Request body must be valid JSON"}), 400
+
+    book_id = data.get("book_id")
+    quantity = data.get("quantity", 1)
+
+    if not isinstance(book_id, int) or isinstance(book_id, bool):
+        return jsonify({"error": "book_id must be an integer"}), 400
+
+    if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0:
+        return jsonify({"error": "quantity must be a positive integer"}), 400
+
+    user = UserProfile.query.get(user_profile_id)
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    book = Book.query.get(book_id)
+
+    if not book:
+        return jsonify({"error": "Book not found"}), 404
+
+    cart = ShoppingCart.query.filter_by(user_profile_id=user_profile_id).first()
+
+    if cart is None:
+        cart = ShoppingCart(user_profile_id=user_profile_id)
+        db.session.add(cart)
+        db.session.flush()
+
+    item = CartItem.query.filter_by(
+        shopping_cart_id=cart.id,
+        book_id=book_id,
+    ).first()
+
+    if item:
+        item.quantity += quantity
+    else:
+        item = CartItem(
+            shopping_cart_id=cart.id,
+            book_id=book_id,
+            quantity=quantity,
+        )
+        db.session.add(item)
 
     try:
-        book_id = require_int(data, "book_id")
-        user_profile_id = require_int(data, "user_profile_id")
-    except ValueError as error:
-        return jsonify({
-            "error": str(error)
-        }), 400
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Book already exists in shopping cart"}), 409
+    except SQLAlchemyError:
+        db.session.rollback()
+        return jsonify({"error": "Database error while adding book to shopping cart"}), 500
 
-    conn = None
-    cur = None
-
-    try:
-        conn = db_conn()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-
-        cur.execute("""
-            INSERT INTO ordered_items (
-                book_id,
-                user_profile_id,
-                order_date
-            )
-            VALUES (%s, %s, NULL)
-            RETURNING
-                id,
-                book_id,
-                user_profile_id,
-                order_date;
-        """, (book_id, user_profile_id))
-
-        cart_item = cur.fetchone()
-        conn.commit()
-
-        return jsonify({
-            "message": "Book added to shopping cart",
-            "cart_item": cart_item,
-        }), 201
-
-    except psycopg2.errors.ForeignKeyViolation:
-        if conn:
-            conn.rollback()
-
-        return jsonify({
-            "error": "book_id or user_profile_id does not exist"
-        }), 404
-
-    except psycopg2.Error:
-        if conn:
-            conn.rollback()
-
-        return jsonify({
-            "error": "Database error while adding book to shopping cart"
-        }), 500
-
-    finally:
-        if cur:
-            cur.close()
-
-        if conn:
-            conn.close()
+    return jsonify({
+        "message": "Book added to shopping cart",
+        "cart_item": item.to_dict(),
+    }), 201
 
 
-@shopping_cart_bp.route(
-    "/shopping-cart/users/<int:user_profile_id>/items",
-    methods=["GET"],
-)
-def list_cart_books(user_profile_id):
-    """Retrieve books currently in a user's shopping cart."""
-    conn = None
-    cur = None
+    
 
-    try:
-        conn = db_conn()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
+@shopping_cart_bp.route("/users/<int:user_profile_id>/cart/items", methods=["GET"])
+@login_required
+def retrieve_cart_items(user_profile_id):
+  if(g.current_user["user_id"] != user_profile_id and g.current_user["role"] != "admin"):
+      return jsonify({"error": "Cannot access another user's cart"}), 403
+  user = UserProfile.query.get(user_profile_id)
 
-        cur.execute("""
-            SELECT 1
-            FROM user_profile
-            WHERE id = %s;
-        """, (user_profile_id,))
+  if not user:
+      return jsonify({"error": "User not found"}), 404
 
-        if not cur.fetchone():
-            return jsonify({
-                "error": "User not found"
-            }), 404
+  cart = ShoppingCart.query.filter_by(user_profile_id=user_profile_id).first()
 
-        cur.execute("""
-            SELECT
-                b.id,
-                b.isbn,
-                b.name,
-                b.description,
-                b.price,
-                b.year_published
-            FROM ordered_items AS oi
-            JOIN book AS b
-                ON b.id = oi.book_id
-            WHERE oi.user_profile_id = %s
-                AND oi.order_date IS NULL
-            ORDER BY oi.id;
-        """, (user_profile_id,))
+  if cart is None:
+      return jsonify({
+          "user_profile_id": user_profile_id,
+          "books": []
+      }), 200
 
-        books = [serialize_book(row) for row in cur.fetchall()]
+  rows = (
+      db.session.query(Book, CartItem.quantity)
+      .join(CartItem, CartItem.book_id == Book.id)
+      .filter(CartItem.shopping_cart_id == cart.id)
+      .all()
+  )
 
-        return jsonify({
-            "user_profile_id": user_profile_id,
-            "books": books,
-        }), 200
+  books = []
 
-    except psycopg2.Error:
-        return jsonify({
-            "error": "Database error while retrieving shopping cart"
-        }), 500
+  for book, quantity in rows:
+      book_data = book.to_dict()
+      book_data["quantity"] = quantity
+      books.append(book_data)
 
-    finally:
-        if cur:
-            cur.close()
+  return jsonify({
+      "user_profile_id": user_profile_id,
+      "books": books
+  }), 200
 
-        if conn:
-            conn.close()
+
+@shopping_cart_bp.route("/users/<int:user_profile_id>/cart/items/<int:book_id>", methods=["DELETE"])
+@login_required
+def delete_cart_item(user_profile_id, book_id):
+  if(g.current_user["user_id"] != user_profile_id and g.current_user["role"] != "admin"):
+      return jsonify({"error": "Cannot access another user's cart"}), 403
+
+  user = UserProfile.query.get(user_profile_id)
+
+  if not user:
+      return jsonify({"error": "User not found"}), 404
+
+  book = Book.query.get(book_id)
+
+  if not book:
+      return jsonify({"error": "Book not found"}), 404
+
+  cart = ShoppingCart.query.filter_by(user_profile_id=user_profile_id).first()
+
+  if cart is None:
+      return jsonify({"error": "Shopping cart not found"}), 404
+
+  item = CartItem.query.filter_by(
+      shopping_cart_id=cart.id,
+      book_id=book_id,
+  ).first()
+
+  if item is None:
+      return jsonify({"error": "Book not found in shopping cart"}), 404
+
+  db.session.delete(item)
+
+  try:
+      db.session.commit()
+  except SQLAlchemyError:
+      db.session.rollback()
+      return jsonify({"error": "Database error while removing book from shopping cart"}), 500
+
+  return jsonify({"message": "Book removed from shopping cart"}), 200

@@ -14,6 +14,9 @@ def serialize_book(row):
         "id": row.id,
         "isbn": row.isbn,
         "name": row.name,
+        "copies_sold": (
+            int(row.copies_sold) if row.copies_sold is not None else None
+        ),
         "description": row.description,
         "price": float(row.price) if row.price is not None else None,
         "year_published": (

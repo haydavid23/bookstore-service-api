@@ -1,236 +1,183 @@
-from flask import Blueprint, jsonify, request
-from psycopg2 import sql
-from psycopg2.extras import RealDictCursor
-from werkzeug.security import generate_password_hash
-from dtos.profile_dto import (
+import os
+import jwt
+from flask import g, Blueprint, jsonify, request
+from datetime import datetime, timedelta, timezone
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from werkzeug.security import generate_password_hash, check_password_hash
+
+from extensions import db
+from auth import login_required
+from models import UserProfile, CreditCard
+from blueprints.profile.dto.profile_dto import (
     CreateProfileDTO,
     ProfileResponseDTO,
     UpdateProfileDTO,
+    CreateCreditCardDTO,
+    CreditCardResponseDTO,
 )
-import os
-import psycopg2
-
 
 profile_bp = Blueprint("profile", __name__)
 
-
-def db_conn():
-    """Open and return a connection to the configured PostgreSQL database."""
-    database_url = os.getenv("DATABASE_URL")
-
-    if not database_url:
-        raise RuntimeError("DATABASE_URL environment variable is not set")
-
-    return psycopg2.connect(database_url)
-
-
 @profile_bp.route("/users", methods=["POST"])
 def create_user():
-    """Create a user profile from the submitted JSON request body."""
     data = request.get_json(silent=True)
-
     if not isinstance(data, dict):
-        return jsonify({
-            "error": "Request body must be valid JSON"
-        }), 400
+        return jsonify({"error": "Request body must be a valid JSON"}), 400
 
     try:
         profile_dto = CreateProfileDTO.from_dict(data)
     except ValueError as error:
-        return jsonify({
-            "error": str(error)
-        }), 400
+        return jsonify({"error": str(error)}), 400
 
-    conn = None
-    cur = None
+    user = UserProfile(
+        username=profile_dto.username,
+        email=profile_dto.email,
+        address=profile_dto.address,
+        first_name=profile_dto.first_name,
+        last_name=profile_dto.last_name,
+        password=generate_password_hash(profile_dto.password),
+        role=profile_dto.role,
+    )
+
+    db.session.add(user)
 
     try:
-        conn = db_conn()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Username or email already exists"}), 409
+    except SQLAlchemyError:
+        db.session.rollback()
+        return jsonify({"error": "Database error while creating user"}), 500
 
-        cur.execute("""
-            INSERT INTO user_profile (
-                username,
-                email,
-                address,
-                first_name,
-                last_name,
-                password
-            )
-            VALUES (%s, %s, %s, %s, %s, %s)
-            RETURNING
-                id,
-                username,
-                email,
-                address,
-                first_name,
-                last_name;
-        """, (
-            profile_dto.username,
-            profile_dto.email,
-            profile_dto.address,
-            profile_dto.first_name,
-            profile_dto.last_name,
-            generate_password_hash(profile_dto.password)
-        ))
-
-        user_row = cur.fetchone()
-        conn.commit()
-
-        response_dto = ProfileResponseDTO.from_row(user_row)
-
-        return jsonify(response_dto.to_dict()), 201
-
-    except psycopg2.errors.UniqueViolation:
-        if conn:
-            conn.rollback()
-
-        return jsonify({
-            "error": "Username or email already exists"
-        }), 409
-
-    except psycopg2.Error:
-        if conn:
-            conn.rollback()
-
-        return jsonify({
-            "error": "Database error while creating user"
-        }), 500
-
-    finally:
-        if cur:
-            cur.close()
-
-        if conn:
-            conn.close()
-
+    response_dto = ProfileResponseDTO.from_model(user)
+    return jsonify(response_dto.to_dict()), 201
 
 @profile_bp.route("/users/<username>", methods=["GET"])
+@login_required
 def get_user(username):
-    """Retrieve one user profile by username."""
-    conn = None
-    cur = None
+    if g.current_user["username"] != username and g.current_user["role"] != "admin":
+        return jsonify({"error": "Cannot access another user's profile"}), 403
+    user = UserProfile.query.filter_by(username=username).first()
 
-    try:
-        conn = db_conn()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
 
-        cur.execute("""
-            SELECT
-                id,
-                username,
-                email,
-                address,
-                first_name,
-                last_name
-            FROM user_profile
-            WHERE username = %s;
-        """, (username,))
-
-        user_row = cur.fetchone()
-
-        if not user_row:
-            return jsonify({
-                "error": "User not found"
-            }), 404
-
-        response_dto = ProfileResponseDTO.from_row(user_row)
-
-        return jsonify(response_dto.to_dict()), 200
-
-    except psycopg2.Error:
-        return jsonify({
-            "error": "Database error while retrieving user"
-        }), 500
-
-    finally:
-        if cur:
-            cur.close()
-
-        if conn:
-            conn.close()
-
+    response_dto = ProfileResponseDTO.from_model(user)
+    return jsonify(response_dto.to_dict()), 200
 
 @profile_bp.route("/users/<username>", methods=["PATCH"])
+@login_required
 def update_user(username):
-    """Update allowed user profile fields by username."""
+    if g.current_user["username"] != username and g.current_user["role"] != "admin":
+        return jsonify({"error": "Cannot access another user's profile"}), 403
     data = request.get_json(silent=True)
 
     if not isinstance(data, dict):
-        return jsonify({
-            "error": "Request body must be valid JSON"
-        }), 400
+        return jsonify({"error": "Request body must be valid JSON"}), 400
 
     try:
         profile_dto = UpdateProfileDTO.from_dict(data)
     except ValueError as error:
-        return jsonify({
-            "error": str(error)
-        }), 400
+        return jsonify({"error": str(error)}), 400
+        
+    user = UserProfile.query.filter_by(username=username).first()
 
-    conn = None
-    cur = None
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    updates = profile_dto.updates.copy()
+        
+    if "password" in updates:
+        updates["password"] = generate_password_hash(updates["password"])
+
+    for field, value in updates.items():
+        setattr(user, field, value)
 
     try:
-        conn = db_conn()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Username already exists"}), 409
+    except SQLAlchemyError:
+        db.session.rollback()
+        return jsonify({"error": "Database error while updating user"}), 500
 
-        updates = profile_dto.updates.copy()
+    response_dto = ProfileResponseDTO.from_model(user)
+    return jsonify(response_dto.to_dict()), 200
 
-        if "password" in updates:
-            updates["password"] = generate_password_hash(updates["password"])
+@profile_bp.route("/users/<username>/credit-cards", methods=["POST"])
+@login_required
+def create_credit_card(username):
+    if g.current_user["username"] != username and g.current_user["role"] != "admin":
+        return jsonify({"error": "Cannot access another user's profile"}), 403
+    data = request.get_json(silent=True)
 
-        assignments = [
-            sql.SQL("{} = %s").format(sql.Identifier(field))
-            for field in updates
-        ]
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be valid JSON"}), 400
 
-        query = sql.SQL("""
-            UPDATE user_profile
-            SET {assignments}
-            WHERE username = %s
-            RETURNING
-                id,
-                username,
-                email,
-                address,
-                first_name,
-                last_name;
-        """).format(assignments=sql.SQL(", ").join(assignments))
+    try:
+        credit_card_dto = CreateCreditCardDTO.from_dict(data)
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
 
-        cur.execute(query, [*updates.values(), username])
-        user_row = cur.fetchone()
+    user = UserProfile.query.filter_by(username=username).first()
 
-        if not user_row:
-            conn.rollback()
-            return jsonify({
-                "error": "User not found"
-            }), 404
+    if not user:
+        return jsonify({"error": "User not found"}), 404
 
-        conn.commit()
-        response_dto = ProfileResponseDTO.from_row(user_row)
+    credit_card = CreditCard(
+        card_number=credit_card_dto.card_number,
+        expiration_date=credit_card_dto.expiration_date,
+        user_profile_id=user.id,
+        cvv=credit_card_dto.cvv,
+    )
 
-        return jsonify(response_dto.to_dict()), 200
+    db.session.add(credit_card)
 
-    except psycopg2.errors.UniqueViolation:
-        if conn:
-            conn.rollback()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Credit card already exists"}), 409
+    except SQLAlchemyError:
+        db.session.rollback()
+        return jsonify({"error": "Database error while creating credit card"}), 500
 
-        return jsonify({
-            "error": "Username already exists"
-        }), 409
+    response_dto = CreditCardResponseDTO.from_model(credit_card)
+    return jsonify(response_dto.to_dict()), 201
 
-    except psycopg2.Error:
-        if conn:
-            conn.rollback()
+@profile_bp.route("/login", methods=["POST"])
+def login():
+    data = request.get_json(silent=True)
 
-        return jsonify({
-            "error": "Database error while updating user"
-        }), 500
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be valid JSON"}), 400
 
-    finally:
-        if cur:
-            cur.close()
+    username = data.get("username")
+    password = data.get("password")
 
-        if conn:
-            conn.close()
+    if not isinstance(username, str) or not username.strip():
+        return jsonify({"error": "username is required"}), 400
+
+    if not isinstance(password, str) or not password:
+        return jsonify({"error": "password is required"}), 400
+    user = UserProfile.query.filter_by(username=username.strip()).first()
+    
+    if not user or not check_password_hash(user.password, password):
+        return jsonify({"error": "Invalid username or password"}), 401
+
+    secret = os.getenv("JWT_SECRET_KEY")
+    if not secret:
+        return jsonify({"error": "JWT secret is not configured"}), 500
+
+    payload = {
+        "user_id": user.id,
+        "username": user.username,
+        "role": user.role,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=2),
+    }
+
+    token = jwt.encode(payload, secret, algorithm="HS256")
+
+    return jsonify({"token": token}), 200

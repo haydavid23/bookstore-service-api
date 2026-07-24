@@ -6,12 +6,14 @@ from dataclasses import dataclass
 #   id         int   author id
 #   name       str   author first name
 #   lastname   str   author last name
+#   bio        str   author biography
 #   publisher  str   name of the publisher the author works with
 @dataclass
 class AuthorResponseDTO:
     id: int
     name: str
     lastname: str
+    bio: str
     publisher: str
 
     @classmethod
@@ -21,6 +23,7 @@ class AuthorResponseDTO:
             id=row.id,
             name=row.name,
             lastname=row.lastname,
+            bio=row.bio,
             publisher=row.publisher,
         )
 
@@ -30,5 +33,6 @@ class AuthorResponseDTO:
             "id": self.id,
             "name": self.name,
             "lastname": self.lastname,
+            "bio": self.bio,
             "publisher": self.publisher,
         }
